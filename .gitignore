@@ -1,0 +1,18 @@
+# secrets / tokens
+.env
+credentials.json
+token.json
+token.pickle
+sheet_config.json
+# runtime
+temp/
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# never commit real passports; only the fictional sample is allowed
+*.jpg
+*.jpeg
+*.pdf
+!samples/sample_passport.png
