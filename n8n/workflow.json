@@ -1,0 +1,242 @@
+{
+  "name": "Visa Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a1",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.Subject || $json.subject || '').toLowerCase() }}",
+              "rightValue": "visa",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "a2",
+      "name": "If subject contains visa"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {
+          "downloadAttachments": true,
+          "dataPropertyAttachmentsPrefixName": "attachment_"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        440,
+        -80
+      ],
+      "id": "a3",
+      "name": "Get Email with Attachments",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst emailData = item.json;\nconst binary = item.binary || {};\nconst key = Object.keys(binary).find((k) => {\n  const f = binary[k];\n  const mime = (f.mimeType || '').toLowerCase();\n  const name = (f.fileName || '').toLowerCase();\n  return mime.includes('pdf') || mime.includes('image') || /\\.(pdf|jpe?g|png)$/.test(name);\n});\nif (!key) throw new Error('No passport attachment found in email (PDF/JPEG/PNG)');\nconst att = binary[key];\n\nconst subject = (emailData.Subject || emailData.subject || '').toLowerCase();\nlet visaType = 'General Visa';\nfor (const [needle, label] of [\n  ['work visa', 'Work Visa'], ['employment visa', 'Employment Visa'],\n  ['visit visa', 'Visit Visa'], ['student visa', 'Student Visa'],\n  ['visa application', 'Visa Application'],\n]) { if (subject.includes(needle)) visaType = label; }\n\nreturn { json: {\n  email_id: emailData.id || '',\n  email_from: emailData.From || emailData.from || '',\n  email_subject: emailData.Subject || emailData.subject || '',\n  visa_type: visaType,\n  filename: att.fileName || 'passport.pdf',\n  attachment_base64: att.data,\n}};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -80
+      ],
+      "id": "a4",
+      "name": "Prepare payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5000/process-passport",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PASTE_YOUR_API_KEY_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email_id: $json.email_id, email_from: $json.email_from, email_subject: $json.email_subject, visa_type: $json.visa_type, filename: $json.filename, attachment_base64: $json.attachment_base64 }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        -80
+      ],
+      "id": "a5",
+      "name": "Extract passport data"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "PASTE_YOUR_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Email From": "={{ $json.email_from }}",
+            "Email Subject": "={{ $json.email_subject }}",
+            "Visa Type": "={{ $json.visa_type }}",
+            "Full Name": "={{ $json.full_name }}",
+            "Passport Number": "={{ $json.passport_number }}",
+            "Nationality": "={{ $json.nationality }}",
+            "Date of Birth": "={{ $json.date_of_birth }}",
+            "Expiry Date": "={{ $json.expiry_date }}",
+            "Gender": "={{ $json.gender }}",
+            "Is Valid": "={{ $json.is_valid }}",
+            "PDF Filename": "={{ $json.pdf_filename }}",
+            "Processed At": "={{ $json.processed_at }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        -80
+      ],
+      "id": "a6",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "If subject contains visa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If subject contains visa": {
+      "main": [
+        [
+          {
+            "node": "Get Email with Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Email with Attachments": {
+      "main": [
+        [
+          {
+            "node": "Prepare payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare payload": {
+      "main": [
+        [
+          {
+            "node": "Extract passport data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract passport data": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visa Passport Processor: live demo</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b2330; --muted: #5d6b82; --line: #e2e6ee;
+    --accent: #2457d6; --ok: #11794a; --ok-bg: #e3f5ec; --bad: #b3261e; --bad-bg: #fcebe9;
+    --warn: #8a5a00; --warn-bg: #fff3d6; --code-bg: #101827; --code-text: #d7e0f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1420; --card: #161e2e; --text: #e6ebf5; --muted: #98a6bf; --line: #27334a;
+      --accent: #7aa2ff; --ok: #5ed39a; --ok-bg: #12301f; --bad: #ff8f86; --bad-bg: #3a1815;
+      --warn: #f2c15c; --warn-bg: #352a0f; --code-bg: #0a0f19; --code-text: #d7e0f0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .banner { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px;
+            font-size: .93rem; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .card h2 { font-size: 1rem; margin: 0 0 12px; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center;
+          color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--accent); }
+  .drop input { display: none; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+           border-radius: 9px; padding: 8px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #preview { max-width: 100%; border-radius: 10px; border: 1px solid var(--line); margin-top: 14px; display: none; }
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: .8rem; font-weight: 600; margin: 0 6px 6px 0; }
+  .ok { background: var(--ok-bg); color: var(--ok); } .bad { background: var(--bad-bg); color: var(--bad); }
+  .info { background: var(--line); color: var(--muted); } .warn { background: var(--warn-bg); color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 42%; }
+  td.empty { color: var(--muted); font-style: italic; }
+  ul.checks { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  details { margin-top: 12px; } summary { cursor: pointer; color: var(--muted); }
+  pre { background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 12px;
+        overflow-x: auto; font-size: .82rem; white-space: pre-wrap; word-break: break-word; }
+  #status { color: var(--muted); margin: 10px 0 0; min-height: 1.4em; }
+  #error { color: var(--bad); }
+  footer { margin-top: 26px; color: var(--muted); font-size: .88rem; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Visa Passport Processor</h1>
+  <p class="sub">OCR, then verified extraction from the passport's machine-readable zone (MRZ), with Gemini and regex fallbacks.</p>
+  <div class="banner"><strong>Use fictional passports only.</strong> Please do not upload a real passport. Files are processed in memory and deleted immediately, but this is a public demo.</div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>1. Choose a passport</h2>
+      <label class="drop" id="drop" tabindex="0">
+        <input type="file" id="file" accept=".pdf,.jpg,.jpeg,.png,image/*,application/pdf">
+        <span>Drop an image here, or click to browse</span>
+      </label>
+      <div class="row">
+        <button type="button" data-sample="sample_passport.png">Try valid sample</button>
+        <button type="button" data-sample="sample_expired.png">Try expired sample</button>
+      </div>
+      <p id="status" role="status"></p>
+      <img id="preview" alt="Selected passport preview">
+    </section>
+
+    <section class="card" aria-live="polite">
+      <h2>2. Extracted data</h2>
+      <div id="result"><p class="sub">Results appear here.</p></div>
+    </section>
+  </div>
+
+  <footer>
+    Pipeline: Tesseract OCR → MRZ parser with ICAO check digits → Gemini / regex fallback.
+    Source code and engineering notes are on GitHub.
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const FIELDS = [
+  ["full_name", "Full name"], ["passport_number", "Passport number"], ["nationality", "Nationality"],
+  ["issuing_country", "Issuing country"], ["date_of_birth", "Date of birth"],
+  ["expiry_date", "Expiry date"], ["gender", "Gender"],
+];
+const CHECK_LABELS = {
+  passport_number: "Passport no.", date_of_birth: "Birth date", expiry_date: "Expiry date",
+  personal_number: "Personal no.", composite: "Overall",
+};
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function setStatus(msg, isError) {
+  const s = $("status");
+  s.textContent = msg;
+  s.style.color = isError ? "var(--bad)" : "var(--muted)";
+}
+
+function render(data) {
+  const box = $("result");
+  box.replaceChildren();
+
+  const badges = el("div");
+  badges.append(
+    el("span", "badge " + (data.is_valid ? "ok" : "bad"), data.is_valid ? "Valid" : "Not valid"),
+    el("span", "badge info", "Method: " + data.extraction_method.toUpperCase())
+  );
+  (data.warnings || []).forEach((w) => badges.append(el("span", "badge warn", w)));
+  (data.missing_fields || []).forEach((f) => badges.append(el("span", "badge bad", "missing: " + f)));
+  box.append(badges);
+
+  const table = el("table");
+  FIELDS.forEach(([key, label]) => {
+    const tr = el("tr");
+    const val = data[key];
+    tr.append(el("td", "", label), el("td", val ? "" : "empty", val || "not found"));
+    table.append(tr);
+  });
+  box.append(table);
+
+  if (data.mrz_checks) {
+    box.append(el("h2", "", "MRZ check digits"));
+    box.lastChild.style.marginTop = "14px";
+    const ul = el("ul", "checks");
+    Object.entries(data.mrz_checks).forEach(([k, ok]) =>
+      ul.append(el("li", "badge " + (ok ? "ok" : "bad"), (ok ? "✓ " : "✗ ") + (CHECK_LABELS[k] || k))));
+    box.append(ul);
+  }
+
+  const ocr = el("details");
+  ocr.append(el("summary", "", "Raw OCR text"), el("pre", "", data.ocr_text || ""));
+  const json = el("details");
+  const { ocr_text, ...clean } = data;
+  json.append(el("summary", "", "JSON response"), el("pre", "", JSON.stringify(clean, null, 2)));
+  box.append(ocr, json);
+}
+
+async function send(file) {
+  const url = URL.createObjectURL(file);
+  const img = $("preview");
+  if (file.type.startsWith("image/")) { img.src = url; img.style.display = "block"; }
+  else { img.style.display = "none"; }
+  setStatus("Reading the document…", false);
+  $("result").replaceChildren(el("p", "sub", "Processing…"));
+  const form = new FormData();
+  form.append("file", file, file.name);
+  try {
+    const res = await fetch("/demo/process", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    setStatus("Done.", false);
+    render(data);
+  } catch (err) {
+    setStatus(err.message, true);
+    $("result").replaceChildren(el("p", "sub", "No result."));
+  }
+}
+
+$("file").addEventListener("change", (e) => e.target.files[0] && send(e.target.files[0]));
+const drop = $("drop");
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } });
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && send(e.dataTransfer.files[0]));
+
+document.querySelectorAll("[data-sample]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    const name = b.dataset.sample;
+    const blob = await (await fetch("/samples/" + name)).blob();
+    send(new File([blob], name, { type: blob.type }));
+  }));
+</script>
+</body>
+</html>
